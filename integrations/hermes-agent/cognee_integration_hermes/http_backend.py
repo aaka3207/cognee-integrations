@@ -60,6 +60,7 @@ null — so omitting the key costs both auto-routing and every session read.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -680,7 +681,15 @@ class HttpBackend(MemoryBackend):
         fields = {"datasetName": dataset}
         if session_id:
             fields["session_id"] = session_id
-        multipart = _multipart_body(fields, {"data": ("memory.txt", text.encode("utf-8"))})
+        # The upload name has to vary with the content. cognee >= 1.6.0 will not
+        # let ``add()`` replace a same-named document whose body differs -- it
+        # raises ``DocumentUpdateRequiredError`` (HTTP 409) instead. With a fixed
+        # name the first ``remember`` in a dataset wins and every later one with
+        # different text bounces off it, permanently. Recall keeps working
+        # throughout, so the store looks healthy and accepts nothing.
+        blob = text.encode("utf-8")
+        name = "memory-%s.txt" % hashlib.sha256(blob).hexdigest()[:16]
+        multipart = _multipart_body(fields, {"data": (name, blob)})
         payload = self._request("POST", "/api/v1/remember", timeout=timeout, multipart=multipart)
         return RememberResponse(payload if isinstance(payload, dict) else {})
 
