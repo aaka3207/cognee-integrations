@@ -216,6 +216,11 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
         or os.environ.get("COGNEE_DATASET", DEFAULT_DATASET),
         "top_k": str_to_int(os.environ.get("COGNEE_TOP_K"), 5),
         "auto_route": str_to_bool(os.environ.get("COGNEE_AUTO_ROUTE"), True),
+        # "" leaves the search type to the server's query classifier, which is
+        # what every release before this one did. Set it to pin one mode --
+        # CHUNKS in particular, which returns stored text rather than an LLM
+        # paraphrase of it, so identifiers survive the round trip.
+        "search_type": os.environ.get("COGNEE_SEARCH_TYPE", ""),
         "improve_on_end": str_to_bool(os.environ.get("COGNEE_IMPROVE_ON_END"), True),
         # Tri-state: "" = auto (background only in server/remote mode, where the
         # server outlives this process; synchronous in embedded). Set to force.
@@ -276,6 +281,7 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
         1, str_to_int(config.get("server_boot_timeout"), DEFAULT_SERVER_BOOT_TIMEOUT)
     )
     config["auto_route"] = str_to_bool(config.get("auto_route"), True)
+    config["search_type"] = str(config.get("search_type") or "").strip().upper()
     config["improve_on_end"] = str_to_bool(config.get("improve_on_end"), True)
     config["embedded"] = str_to_bool(config.get("embedded"), False)
     config["recall_budget"] = max(1, str_to_int(config.get("recall_budget"), 20))

@@ -145,6 +145,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._dataset = DEFAULT_DATASET
         self._top_k = 5
         self._auto_route = True
+        self._default_search_type = ""
         self._improve_on_end = True
         self._writes_enabled = True
         self._hermes_home: str | None = None
@@ -321,6 +322,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._dataset = self._default_dataset
         self._top_k = int(self._config.get("top_k") or 5)
         self._auto_route = str_to_bool(self._config.get("auto_route"), True)
+        self._default_search_type = str(self._config.get("search_type") or "").strip()
         self._improve_on_end = str_to_bool(self._config.get("improve_on_end"), True)
         self._writes_enabled = kwargs.get("agent_context", "primary") in {"", "primary", None}
         self._session_cognee_id = self._build_cognee_session_id(session_id, **kwargs)
@@ -846,8 +848,9 @@ class CogneeMemoryProvider(MemoryProvider):
         next to the cognified graph. The session id still travels: on cognee
         >= 1.6.0 the graph item's prompt then carries this conversation's
         history, and an explicit graph scope never returns raw session entries.
-        ``search_type`` is the caller's override or None for the query
-        classifier.
+        ``search_type`` is the caller's override; without one the configured
+        ``search_type`` applies, and without that either the server's query
+        classifier decides.
         """
         return self._backend.recall(
             query=query,
@@ -855,7 +858,7 @@ class CogneeMemoryProvider(MemoryProvider):
             datasets=[self._dataset],
             top_k=top_k,
             auto_route=self._auto_route,
-            query_type=search_type or None,
+            query_type=search_type or self._default_search_type or None,
             scope=["graph"],
             timeout=self._timeout("recall_timeout", 120),
         )

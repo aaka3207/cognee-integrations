@@ -323,6 +323,7 @@ LLM_API_KEY=sk-...
 | `dataset` | `COGNEE_PLUGIN_DATASET` (canonical) | `agent_sessions` |
 | `top_k` | `COGNEE_TOP_K` | `5` |
 | `auto_route` | `COGNEE_AUTO_ROUTE` | `true` |
+| `search_type` | `COGNEE_SEARCH_TYPE` | empty (the server's query classifier decides) |
 | `improve_on_end` | `COGNEE_IMPROVE_ON_END` | `true` |
 | `improve_background` | `COGNEE_IMPROVE_BACKGROUND` | auto |
 | `session_prefix` | `COGNEE_SESSION_PREFIX` | `hermes` |
