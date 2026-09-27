@@ -222,6 +222,9 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
         # paraphrase of it, so identifiers survive the round trip.
         "search_type": os.environ.get("COGNEE_SEARCH_TYPE", ""),
         "improve_on_end": str_to_bool(os.environ.get("COGNEE_IMPROVE_ON_END"), True),
+        # False stops the per-turn session-cache write. ``improve_on_end`` only
+        # governs promotion at session end, so it is not a way to turn this off.
+        "session_writes": str_to_bool(os.environ.get("COGNEE_SESSION_WRITES"), True),
         # Tri-state: "" = auto (background only in server/remote mode, where the
         # server outlives this process; synchronous in embedded). Set to force.
         "improve_background": os.environ.get("COGNEE_IMPROVE_BACKGROUND", ""),
@@ -283,6 +286,7 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
     config["auto_route"] = str_to_bool(config.get("auto_route"), True)
     config["search_type"] = str(config.get("search_type") or "").strip().upper()
     config["improve_on_end"] = str_to_bool(config.get("improve_on_end"), True)
+    config["session_writes"] = str_to_bool(config.get("session_writes"), True)
     config["embedded"] = str_to_bool(config.get("embedded"), False)
     config["recall_budget"] = max(1, str_to_int(config.get("recall_budget"), 20))
     config["memory_steer"] = str_to_bool(config.get("memory_steer"), True)

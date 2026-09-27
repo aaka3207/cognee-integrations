@@ -151,6 +151,7 @@ class TestDefaults(unittest.TestCase):
         self.assertIs(cfg["auto_route"], True)
         self.assertEqual(cfg["search_type"], "")
         self.assertIs(cfg["improve_on_end"], True)
+        self.assertIs(cfg["session_writes"], True)
         self.assertIs(cfg["embedded"], False)
 
     def test_search_type_is_normalised_to_upper_case(self):

@@ -325,6 +325,7 @@ LLM_API_KEY=sk-...
 | `auto_route` | `COGNEE_AUTO_ROUTE` | `true` |
 | `search_type` | `COGNEE_SEARCH_TYPE` | empty (the server's query classifier decides) |
 | `improve_on_end` | `COGNEE_IMPROVE_ON_END` | `true` |
+| `session_writes` | `COGNEE_SESSION_WRITES` | `true` (per-turn session-cache write) |
 | `improve_background` | `COGNEE_IMPROVE_BACKGROUND` | auto |
 | `session_prefix` | `COGNEE_SESSION_PREFIX` | `hermes` |
 | `service_url` | `COGNEE_BASE_URL` (canonical) | empty |

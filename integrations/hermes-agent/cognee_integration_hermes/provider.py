@@ -147,6 +147,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._auto_route = True
         self._default_search_type = ""
         self._improve_on_end = True
+        self._session_writes = True
         self._writes_enabled = True
         self._hermes_home: str | None = None
         self._prefetch_result = ""
@@ -324,6 +325,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._auto_route = str_to_bool(self._config.get("auto_route"), True)
         self._default_search_type = str(self._config.get("search_type") or "").strip()
         self._improve_on_end = str_to_bool(self._config.get("improve_on_end"), True)
+        self._session_writes = str_to_bool(self._config.get("session_writes"), True)
         self._writes_enabled = kwargs.get("agent_context", "primary") in {"", "primary", None}
         self._session_cognee_id = self._build_cognee_session_id(session_id, **kwargs)
         self._apply_dataset_override()
@@ -546,7 +548,19 @@ class CogneeMemoryProvider(MemoryProvider):
         self._prefetch_thread.start()
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
-        if not self._is_usable() or not self._writes_enabled or self._is_breaker_open():
+        """Mirror one completed turn into the session cache.
+
+        ``session_writes`` gates this. It is the only switch that does:
+        ``improve_on_end`` governs promotion into the permanent dataset at
+        session end, not the per-turn write, so turning that off leaves this
+        running. ``on_delegation`` routes through here and is covered too.
+        """
+        if (
+            not self._is_usable()
+            or not self._writes_enabled
+            or not self._session_writes
+            or self._is_breaker_open()
+        ):
             return
 
         cognee_session_id = self._session_cognee_id_for(session_id)

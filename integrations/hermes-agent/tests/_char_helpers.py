@@ -368,6 +368,7 @@ def make_provider(
     writes_enabled=True,
     auto_route=True,
     improve_on_end=True,
+    session_writes=True,
     search_type="",
     config=None,
 ):
@@ -390,6 +391,7 @@ def make_provider(
     provider._auto_route = auto_route
     provider._default_search_type = search_type
     provider._improve_on_end = improve_on_end
+    provider._session_writes = session_writes
     provider._session_id = session_id
     provider._session_cognee_id = session_cognee_id or f"hermes_{session_id}"
     provider._default_dataset = dataset
