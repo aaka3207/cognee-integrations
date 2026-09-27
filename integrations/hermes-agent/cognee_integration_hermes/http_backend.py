@@ -84,6 +84,12 @@ logger = logging.getLogger(__name__)
 
 _API_KEY_NAME = "hermes-owner-bootstrap"
 
+# The search type the server itself substitutes when ``auto_route`` is off and
+# no type was named. Kept here rather than inline so the coupling to the
+# server's behaviour is visible in one place: if that default ever moves, this
+# is the line that has to move with it.
+_AUTO_ROUTE_OFF_SEARCH_TYPE = "GRAPH_COMPLETION"
+
 # How the server's login route phrases the two rejections a default-user login
 # can get (cognee 1.6.0 ``/api/v1/auth/login``, both HTTP 400). Matched
 # case-insensitively against the response body.
@@ -636,7 +642,13 @@ class HttpBackend(MemoryBackend):
             # that type directly bypasses the classifier too, so this is the same
             # retrieval path — only cognee's router-override counter differs,
             # which is pure telemetry.
-            query_type = "GRAPH_COMPLETION"
+            #
+            # Worth knowing which way this cuts: turning ``auto_route`` off does
+            # not make retrieval more literal, it pins the completion. A caller
+            # that wants raw stored text has to name a type -- per call, or once
+            # via the ``search_type`` setting, which reaches here as an explicit
+            # ``query_type`` and so pre-empts this branch entirely.
+            query_type = _AUTO_ROUTE_OFF_SEARCH_TYPE
 
         body: dict[str, Any] = {"query": query, "top_k": top_k}
         if session_id:

@@ -489,7 +489,9 @@ class TestRecallPayload(unittest.TestCase):
         self.assertEqual(kwargs["query_type"], "CHUNKS")
 
     def test_an_explicit_search_type_still_beats_the_configured_one(self):
-        kwargs = self._recall_kwargs({"query": "q", "search_type": "INSIGHTS"}, search_type="CHUNKS")
+        kwargs = self._recall_kwargs(
+            {"query": "q", "search_type": "INSIGHTS"}, search_type="CHUNKS"
+        )
         self.assertEqual(kwargs["query_type"], "INSIGHTS")
 
 
