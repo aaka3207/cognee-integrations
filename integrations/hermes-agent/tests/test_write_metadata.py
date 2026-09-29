@@ -126,6 +126,51 @@ class TestMemoryWriteMirror(unittest.TestCase):
         self.assertEqual(meta["write_origin"], "background_review")
 
 
+class TestRecallShowsMetadata(unittest.TestCase):
+    # The shape a CHUNKS row has over HTTP on cognee 1.6.1, observed live: the
+    # chunk payload flat, external_metadata as JSON text beside the score.
+    _STORED = {
+        "created_at": "2026-09-29T16:00:00+00:00",
+        "created_by": "hermes",
+        "notion_page_id": _PAGE_DASHED,
+        "_cognee": {"source_uri": "file:///app/memory-x.txt"},
+    }
+
+    def _recall(self, row):
+        with fake_backend() as fake:
+            fake.results["recall"] = [row]
+            return json.loads(
+                make_provider().handle_tool_call("cognee_recall", {"query": "morning workouts"})
+            )
+
+    def test_a_chunks_row_carries_its_metadata_to_the_agent(self):
+        row = {
+            "text": "prefers mornings",
+            "score": 0.1,
+            "external_metadata": json.dumps(self._STORED),
+        }
+        item = self._recall(row)["results"][0]
+        self.assertEqual(item["text"], "prefers mornings")
+        self.assertEqual(
+            item["metadata"],
+            {
+                "created_at": "2026-09-29T16:00:00+00:00",
+                "created_by": "hermes",
+                "notion_page_id": _PAGE_DASHED,
+            },
+        )
+
+    def test_a_nested_payload_is_read_too(self):
+        row = {"text": "t", "payload": {"external_metadata": {"created_by": "hermes"}}}
+        self.assertEqual(self._recall(row)["results"][0]["metadata"], {"created_by": "hermes"})
+
+    def test_a_row_without_usable_metadata_is_unchanged(self):
+        for raw in (None, "", "not json", "[1, 2]", json.dumps({"_cognee": {}})):
+            with self.subTest(raw=raw):
+                item = self._recall({"text": "t", "external_metadata": raw})["results"][0]
+                self.assertNotIn("metadata", item)
+
+
 class TestNotionPageId(unittest.TestCase):
     def test_accepted_forms(self):
         cases = {

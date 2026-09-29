@@ -142,6 +142,27 @@ def _result_text(value: Any) -> str:
     return str(value)
 
 
+def _result_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    """A recalled chunk's ``external_metadata``, decoded, minus cognee's own keys.
+
+    CHUNKS rows carry the chunk payload flat, and cognee >= 1.6.1 stores the
+    document's metadata on it as JSON text. Keys starting with ``_`` (cognee's
+    ``_cognee`` loader block) are internal and dropped. Anything that does not
+    decode to a dict yields ``{}``, so a row without metadata is unchanged.
+    """
+    raw = data.get("external_metadata")
+    if raw is None and isinstance(data.get("payload"), dict):
+        raw = data["payload"].get("external_metadata")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {key: value for key, value in raw.items() if not str(key).startswith("_")}
+
+
 def _recall_failure_advice(exc: Exception) -> str:
     """One actionable sentence appended to a timeout-shaped recall failure.
 
@@ -1637,6 +1658,10 @@ class CogneeMemoryProvider(MemoryProvider):
         for key in ("score", "dataset", "dataset_name", "node_name"):
             if data.get(key) is not None:
                 normalized[key] = data[key]
+        # Verbatim, like the text: dates and ids here are what the agent acts on.
+        metadata = _result_metadata(data)
+        if metadata:
+            normalized["metadata"] = metadata
         return normalized
 
     def _memory_lane_texts(self, results: list[Any]) -> list[str]:
