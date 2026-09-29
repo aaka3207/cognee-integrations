@@ -6,10 +6,8 @@ import concurrent.futures
 import json
 import logging
 import os
-import re
 import threading
 import time
-import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -17,6 +15,7 @@ from typing import Any, Optional
 from . import code_graph, dataset_overrides, exit_watcher
 from .backend import MemoryBackend, build_backend, default_backend, has_cognee
 from .config import (
+    DEFAULT_CREATED_BY,
     DEFAULT_DATASET,
     DEFAULT_IDENTITY_EMAIL,
     DEFAULT_IDENTITY_PASSWORD,
@@ -56,35 +55,51 @@ logger = logging.getLogger(__name__)
 
 _BREAKER_THRESHOLD = 5
 
-# A Notion page id: 32 hex digits, bare or in the dashed 8-4-4-4-12 form. In a
-# URL the bare form ends the slug ("Title-<32 hex>"), so the lookarounds keep a
-# hex-looking last title word from being read as part of the id.
-_NOTION_DASHED_ID = re.compile(
-    r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])"
-)
-_NOTION_BARE_ID = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])")
+# Caller-supplied metadata is flat, small and cannot collide with what the
+# plugin or cognee own. ``node_set`` is rejected by cognee itself (the request
+# would fail), and ``_``-prefixed keys are cognee's namespace (``_cognee``).
+_METADATA_MAX_KEYS = 16
+_METADATA_MAX_KEY_CHARS = 64
+_METADATA_MAX_VALUE_CHARS = 500
+_METADATA_RESERVED_KEYS = frozenset({"node_set"})
 
 
-def _normalize_notion_page_id(value: Any) -> str:
-    """The page id in *value* as a dashed lowercase UUID, or "" if there is none.
+def _clean_metadata(raw: Any) -> tuple[dict[str, Any], str]:
+    """Validate a caller's metadata object. Returns ``(metadata, "")`` or
+    ``({}, reason)``; a reason means nothing should be stored.
 
-    Accepts a bare id, a dashed id or a Notion URL. A peek URL
-    (``.../<database>?v=<view>&p=<page>``) names the page in ``p``, so that wins;
-    otherwise the query and fragment are dropped, because ``v`` is a database
-    view id and would be read as a valid-looking wrong answer.
+    Values must be strings, numbers or booleans -- cognee renders metadata as
+    ``key: value`` lines, so nesting would not survive it. ``None`` values are
+    dropped rather than rejected.
     """
-    raw = str(value or "").strip().lower()
-    path, _, query = raw.split("#", 1)[0].partition("?")
-    peek = urllib.parse.parse_qs(query).get("p")
-    text = peek[0] if peek else path
-    dashed = _NOTION_DASHED_ID.findall(text)
-    if dashed:
-        return dashed[-1]
-    bare = _NOTION_BARE_ID.findall(text)
-    if not bare:
-        return ""
-    h = bare[-1]
-    return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
+    if raw is None:
+        return {}, ""
+    if not isinstance(raw, dict):
+        return {}, "metadata must be an object of key/value pairs."
+    if len(raw) > _METADATA_MAX_KEYS:
+        return {}, f"metadata may have at most {_METADATA_MAX_KEYS} keys; got {len(raw)}."
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            return {}, "metadata keys must be non-empty strings."
+        key = key.strip()
+        if len(key) > _METADATA_MAX_KEY_CHARS:
+            return {}, f"metadata key {key[:40]!r}... is longer than {_METADATA_MAX_KEY_CHARS}."
+        if key in _METADATA_RESERVED_KEYS or key.startswith("_"):
+            return {}, f"metadata key {key!r} is reserved."
+        if value is None:
+            continue
+        if isinstance(value, bool) or isinstance(value, (int, float)):
+            cleaned[key] = value
+        elif isinstance(value, str):
+            if len(value) > _METADATA_MAX_VALUE_CHARS:
+                return {}, (
+                    f"metadata value for {key!r} is longer than {_METADATA_MAX_VALUE_CHARS}."
+                )
+            cleaned[key] = value
+        else:
+            return {}, f"metadata value for {key!r} must be a string, number or boolean."
+    return cleaned, ""
 
 
 _BREAKER_COOLDOWN_SECS = 120
@@ -206,6 +221,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._improve_on_end = True
         self._session_writes = True
         self._write_metadata = False
+        self._created_by = DEFAULT_CREATED_BY
         self._writes_enabled = True
         self._hermes_home: str | None = None
         self._prefetch_result = ""
@@ -385,6 +401,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._improve_on_end = str_to_bool(self._config.get("improve_on_end"), True)
         self._session_writes = str_to_bool(self._config.get("session_writes"), True)
         self._write_metadata = str_to_bool(self._config.get("write_metadata"), False)
+        self._created_by = str(self._config.get("created_by") or DEFAULT_CREATED_BY)
         self._writes_enabled = kwargs.get("agent_context", "primary") in {"", "primary", None}
         self._session_cognee_id = self._build_cognee_session_id(session_id, **kwargs)
         self._apply_dataset_override()
@@ -949,8 +966,9 @@ class CogneeMemoryProvider(MemoryProvider):
     ) -> Optional[dict[str, Any]]:
         """The ``external_metadata`` for one permanent write, or None when off.
 
-        ``created_at`` is the write time in UTC. ``created_by`` names the agent:
-        several agents can share one dataset, and this one is always Hermes.
+        ``created_at`` is the write time in UTC. ``created_by`` names the writer
+        (``created_by`` in config, default "hermes"): several agents, or several
+        Hermes profiles, can share one dataset.
         ``hermes_session_id`` is the Hermes session id, not the cognee one, so the
         record points back at the conversation it came from. ``write_origin``
         names the lane that wrote it. These are set here, after *extra*, so a
@@ -961,7 +979,7 @@ class CogneeMemoryProvider(MemoryProvider):
         metadata: dict[str, Any] = dict(extra or {})
         metadata.update(
             created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            created_by="hermes",
+            created_by=self._created_by,
             write_origin=origin,
         )
         if self._session_id:
@@ -1202,22 +1220,10 @@ class CogneeMemoryProvider(MemoryProvider):
             return json.dumps({"error": "Missing required parameter: content"})
         dataset = str(args.get("dataset") or self._dataset)
         extra: dict[str, Any] = {}
-        raw_page_id = args.get("notion_page_id")
-        if self._write_metadata and raw_page_id:
-            page_id = _normalize_notion_page_id(raw_page_id)
-            if not page_id:
-                # Refuse rather than store a pointer that resolves to nothing: a
-                # truncated id reads as usable and is worse than no pointer.
-                return json.dumps(
-                    {
-                        "error": (
-                            "notion_page_id must contain a Notion page id (32 hex "
-                            "characters, bare or dashed) or be a Notion URL ending "
-                            f"in one; got {str(raw_page_id)[:120]!r}. Nothing was stored."
-                        )
-                    }
-                )
-            extra["notion_page_id"] = page_id
+        if self._write_metadata:
+            extra, problem = _clean_metadata(args.get("metadata"))
+            if problem:
+                return json.dumps({"error": f"{problem} Nothing was stored."})
 
         try:
             result = self._remember_permanent(

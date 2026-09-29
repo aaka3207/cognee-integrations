@@ -66,14 +66,17 @@ REMEMBER_WITH_METADATA_SCHEMA = {
         **REMEMBER_SCHEMA["parameters"],
         "properties": {
             **REMEMBER_SCHEMA["parameters"]["properties"],
-            "notion_page_id": {
-                "type": "string",
+            "metadata": {
+                "type": "object",
                 "description": (
-                    "Optional. The Notion page this fact is about, as a page id or "
-                    "a full Notion URL. Stored as metadata beside the content, so "
-                    "the current state can be looked up in Notion. Must contain the "
-                    "page's 32-character id; anything else is rejected, not stored."
+                    "Optional flat key/value labels stored beside the content and "
+                    "returned with it by cognee_recall (e.g. a source id or a "
+                    "reference to where the current state lives). Values are "
+                    "strings, numbers or booleans; at most 16 keys. created_at, "
+                    "created_by, write_origin and hermes_session_id are set "
+                    "automatically and cannot be overridden."
                 ),
+                "additionalProperties": {"type": ["string", "number", "boolean"]},
             },
         },
     },

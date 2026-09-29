@@ -2,9 +2,10 @@
 
 Off by default, and off means the request is unchanged -- no metadata kwarg
 value, no extra tool argument. On, every permanent write names when it was
-written, from which Hermes session and by which lane, and ``cognee_remember``
-accepts an optional Notion page pointer that is validated before anything is
-stored. Run standalone with ``python3 tests/test_write_metadata.py``.
+written, by whom, from which Hermes session and by which lane, and
+``cognee_remember`` accepts an optional flat ``metadata`` object that is
+validated before anything is stored. ``cognee_recall`` hands stored metadata
+back with each result. Run standalone with ``python3 tests/test_write_metadata.py``.
 """
 
 import json
@@ -18,10 +19,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from _char_helpers import fake_backend, make_provider  # noqa: E402
-from cognee_integration_hermes.provider import _normalize_notion_page_id  # noqa: E402
-
-_PAGE = "1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6"
-_PAGE_DASHED = "1a2b3c4d-5e6f-47a8-b9c0-d1e2f3a4b5c6"
 
 
 def _remember(provider, args):
@@ -38,13 +35,13 @@ class TestOff(unittest.TestCase):
             make_provider().handle_tool_call("cognee_remember", {"content": "fact"})
             self.assertIsNone(fake.only_call("remember_permanent")["metadata"])
 
-    def test_the_tool_does_not_offer_a_notion_page_id(self):
+    def test_the_tool_does_not_offer_metadata(self):
         provider = make_provider(config={"write_metadata": False})
-        self.assertNotIn("notion_page_id", _remember_schema(provider)["parameters"]["properties"])
+        self.assertNotIn("metadata", _remember_schema(provider)["parameters"]["properties"])
 
-    def test_a_notion_page_id_passed_anyway_is_ignored_not_rejected(self):
+    def test_metadata_passed_anyway_is_ignored_not_rejected(self):
         with fake_backend() as fake:
-            envelope = _remember(make_provider(), {"content": "fact", "notion_page_id": "junk"})
+            envelope = _remember(make_provider(), {"content": "fact", "metadata": "junk"})
             self.assertNotIn("error", envelope)
             self.assertIsNone(fake.only_call("remember_permanent")["metadata"])
 
@@ -57,7 +54,7 @@ class TestOn(unittest.TestCase):
             calls = fake.kwargs_for("remember_permanent")
         return envelope, (calls[0]["metadata"] if calls else None), len(calls)
 
-    def test_a_tool_write_names_its_time_session_and_lane(self):
+    def test_a_tool_write_names_its_time_writer_session_and_lane(self):
         before = datetime.now(timezone.utc) - timedelta(seconds=1)
         _, meta, _ = self._metadata({"content": "fact"}, session_id="sess-42")
         self.assertEqual(meta["write_origin"], "cognee_remember")
@@ -67,16 +64,27 @@ class TestOn(unittest.TestCase):
         created = datetime.fromisoformat(meta["created_at"])
         self.assertEqual(created.utcoffset(), timedelta(0))
         self.assertGreaterEqual(created, before.replace(microsecond=0))
-        self.assertNotIn("notion_page_id", meta)
+        self.assertEqual(
+            set(meta), {"created_at", "created_by", "write_origin", "hermes_session_id"}
+        )
+
+    def test_created_by_follows_the_setting(self):
+        with fake_backend() as fake:
+            provider = make_provider(write_metadata=True)
+            provider._created_by = "hermes-dinefile"
+            provider.handle_tool_call("cognee_remember", {"content": "fact"})
+            self.assertEqual(
+                fake.only_call("remember_permanent")["metadata"]["created_by"], "hermes-dinefile"
+            )
 
     def test_the_automatic_keys_cannot_be_overwritten(self):
-        with fake_backend() as fake:
-            provider = make_provider(write_metadata=True, session_id="sess-1")
-            meta = provider._metadata_for(
-                "cognee_remember",
-                {"created_by": "claude", "write_origin": "x", "hermes_session_id": "y"},
-            )
-            self.assertEqual(fake.kwargs_for("remember_permanent"), [])
+        _, meta, _ = self._metadata(
+            {
+                "content": "fact",
+                "metadata": {"created_by": "claude", "write_origin": "x", "hermes_session_id": "y"},
+            },
+            session_id="sess-1",
+        )
         self.assertEqual(meta["created_by"], "hermes")
         self.assertEqual(meta["write_origin"], "cognee_remember")
         self.assertEqual(meta["hermes_session_id"], "sess-1")
@@ -85,24 +93,48 @@ class TestOn(unittest.TestCase):
         _, meta, _ = self._metadata({"content": "fact"}, session_id="")
         self.assertNotIn("hermes_session_id", meta)
 
-    def test_the_tool_offers_a_notion_page_id(self):
+    def test_the_tool_offers_a_metadata_object(self):
         provider = make_provider(write_metadata=True, config={"write_metadata": True})
         properties = _remember_schema(provider)["parameters"]["properties"]
-        self.assertIn("notion_page_id", properties)
-        self.assertEqual(set(properties) - {"notion_page_id"}, {"content", "dataset"})
+        self.assertEqual(properties["metadata"]["type"], "object")
+        self.assertEqual(set(properties), {"content", "dataset", "metadata"})
 
-    def test_a_valid_notion_page_id_is_stored_canonical(self):
-        _, meta, _ = self._metadata({"content": "fact", "notion_page_id": _PAGE})
-        self.assertEqual(meta["notion_page_id"], _PAGE_DASHED)
-
-    def test_an_invalid_notion_page_id_stores_nothing(self):
-        # The truncated-URL bug: a pointer that resolves to nothing reads as usable.
-        envelope, _, calls = self._metadata(
-            {"content": "fact", "notion_page_id": "https://app.notion.so"}
+    def test_caller_metadata_is_stored_beside_the_automatic_keys(self):
+        _, meta, _ = self._metadata(
+            {
+                "content": "fact",
+                "metadata": {
+                    "source_id": "ticket-42",
+                    "priority": 2,
+                    "verified": True,
+                    "gone": None,
+                },
+            }
         )
-        self.assertIn("notion_page_id", envelope["error"])
-        self.assertIn("Nothing was stored", envelope["error"])
-        self.assertEqual(calls, 0)
+        self.assertEqual(meta["source_id"], "ticket-42")
+        self.assertEqual(meta["priority"], 2)
+        self.assertIs(meta["verified"], True)
+        # A None value is dropped, not stored and not an error.
+        self.assertNotIn("gone", meta)
+        self.assertEqual(meta["created_by"], "hermes")
+
+    def test_invalid_metadata_stores_nothing(self):
+        cases = {
+            "not an object": "a string",
+            "nested value": {"k": {"inner": 1}},
+            "list value": {"k": [1, 2]},
+            "reserved node_set": {"node_set": "x"},
+            "cognee namespace": {"_cognee": "x"},
+            "empty key": {" ": "x"},
+            "long key": {"k" * 65: "x"},
+            "long value": {"k": "v" * 501},
+            "too many keys": {f"k{i}": i for i in range(17)},
+        }
+        for label, metadata in cases.items():
+            with self.subTest(label):
+                envelope, _, calls = self._metadata({"content": "fact", "metadata": metadata})
+                self.assertIn("Nothing was stored", envelope["error"])
+                self.assertEqual(calls, 0)
 
 
 class TestMemoryWriteMirror(unittest.TestCase):
@@ -132,7 +164,7 @@ class TestRecallShowsMetadata(unittest.TestCase):
     _STORED = {
         "created_at": "2026-09-29T16:00:00+00:00",
         "created_by": "hermes",
-        "notion_page_id": _PAGE_DASHED,
+        "source_id": "ticket-42",
         "_cognee": {"source_uri": "file:///app/memory-x.txt"},
     }
 
@@ -156,7 +188,7 @@ class TestRecallShowsMetadata(unittest.TestCase):
             {
                 "created_at": "2026-09-29T16:00:00+00:00",
                 "created_by": "hermes",
-                "notion_page_id": _PAGE_DASHED,
+                "source_id": "ticket-42",
             },
         )
 
@@ -169,41 +201,6 @@ class TestRecallShowsMetadata(unittest.TestCase):
             with self.subTest(raw=raw):
                 item = self._recall({"text": "t", "external_metadata": raw})["results"][0]
                 self.assertNotIn("metadata", item)
-
-
-class TestNotionPageId(unittest.TestCase):
-    def test_accepted_forms(self):
-        cases = {
-            "bare": _PAGE,
-            "dashed": _PAGE_DASHED,
-            "upper case": _PAGE.upper(),
-            "padded": f"  {_PAGE}  ",
-            "url": f"https://www.notion.so/workspace/Project-Plan-{_PAGE}",
-            # A hex-looking last title word must not be glued onto the id.
-            "hex title word": f"https://www.notion.so/Cafe-Bad-{_PAGE}",
-            "url with a view": f"https://www.notion.so/{_PAGE}?v=ffffffffffffffffffffffffffffffff",
-            "fragment": f"https://www.notion.so/Plan-{_PAGE}#abc",
-        }
-        for label, value in cases.items():
-            with self.subTest(label):
-                self.assertEqual(_normalize_notion_page_id(value), _PAGE_DASHED)
-
-    def test_a_peek_url_names_the_page_in_p_not_the_database_in_the_path(self):
-        database = "ffffffffffffffffffffffffffffffff"
-        url = f"https://www.notion.so/{database}?v=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee&p={_PAGE}"
-        self.assertEqual(_normalize_notion_page_id(url), _PAGE_DASHED)
-
-    def test_rejected_forms(self):
-        for value in (
-            "",
-            None,
-            "https://app.notion.so",
-            _PAGE[:31],
-            _PAGE + "a",
-            "not a page",
-        ):
-            with self.subTest(value=value):
-                self.assertEqual(_normalize_notion_page_id(value), "")
 
 
 if __name__ == "__main__":
