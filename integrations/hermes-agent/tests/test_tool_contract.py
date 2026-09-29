@@ -362,7 +362,7 @@ class TestDispatch(unittest.TestCase):
         self.assertEqual(schemas["cognee_code_search"]["parameters"]["required"], ["operation"])
         self.assertEqual(
             set(schemas["cognee_recall"]["parameters"]["properties"]),
-            {"query", "search_type", "top_k"},
+            {"query", "search_type", "top_k", "context_only"},
         )
 
     def test_optional_tools_can_be_disabled_by_config(self):
@@ -493,6 +493,32 @@ class TestRecallPayload(unittest.TestCase):
             {"query": "q", "search_type": "INSIGHTS"}, search_type="CHUNKS"
         )
         self.assertEqual(kwargs["query_type"], "INSIGHTS")
+
+    def test_recall_asks_for_an_answer_by_default(self):
+        self.assertIs(self._recall_kwargs({"query": "q"})["only_context"], False)
+
+    def test_context_only_skips_the_completion_and_walks_the_graph(self):
+        # The configured default is normally CHUNKS, which has no completion to
+        # skip; context_only has to name a completion type to mean anything.
+        kwargs = self._recall_kwargs(
+            {"query": "q", "context_only": True}, search_type="CHUNKS"
+        )
+        self.assertIs(kwargs["only_context"], True)
+        self.assertEqual(kwargs["query_type"], "GRAPH_COMPLETION")
+
+    def test_context_only_keeps_an_explicit_search_type(self):
+        kwargs = self._recall_kwargs(
+            {"query": "q", "context_only": True, "search_type": "TRIPLET_COMPLETION"}
+        )
+        self.assertEqual(kwargs["query_type"], "TRIPLET_COMPLETION")
+
+    def test_context_only_still_sends_this_conversations_session(self):
+        # Without it the server fills the context's history from the dataset's
+        # default session, which other clients' completions write to.
+        kwargs = self._recall_kwargs(
+            {"query": "q", "context_only": True}, session_cognee_id="hermes_abc"
+        )
+        self.assertEqual(kwargs["session_id"], "hermes_abc")
 
 
 class TestTopKClamping(unittest.TestCase):

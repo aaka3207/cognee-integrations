@@ -147,6 +147,10 @@ def _coerce_result_dict(value: Any) -> dict[str, Any]:
 #: rendered verbatim (see ``CogneeMemoryProvider._run_layered_prefetch``).
 _MEMORY_LANE = "cognee_memory"
 
+#: What a ``context_only`` recall runs when the caller names no search type:
+#: the graph-walking completion, whose context is the part worth having.
+_CONTEXT_ONLY_SEARCH_TYPE = "GRAPH_COMPLETION"
+
 
 def _result_text(value: Any) -> str:
     data = _coerce_result_dict(value)
@@ -937,6 +941,7 @@ class CogneeMemoryProvider(MemoryProvider):
         search_type: Any,
         top_k: int,
         session_id: str,
+        only_context: bool = False,
     ) -> list[Any]:
         """The explicit ``cognee_recall`` search: the knowledge graph, stated outright.
 
@@ -949,6 +954,12 @@ class CogneeMemoryProvider(MemoryProvider):
         ``search_type`` is the caller's override; without one the configured
         ``search_type`` applies, and without that either the server's query
         classifier decides.
+
+        ``only_context`` skips the server's LLM completion: the item's ``text``
+        is the context the completion would have read. The session id matters
+        more here, not less -- without one the server builds that context's
+        history layer from the dataset's default session, which holds other
+        clients' completion answers.
         """
         return self._backend.recall(
             query=query,
@@ -958,6 +969,7 @@ class CogneeMemoryProvider(MemoryProvider):
             auto_route=self._auto_route,
             query_type=search_type or self._default_search_type or None,
             scope=["graph"],
+            only_context=only_context,
             timeout=self._timeout("recall_timeout", 120),
         )
 
@@ -1179,6 +1191,11 @@ class CogneeMemoryProvider(MemoryProvider):
         # A ``scope`` argument from an older tool schema is ignored: every
         # explicit recall targets the graph (see ``_recall``).
         search_type = args.get("search_type")
+        context_only = bool(args.get("context_only", False))
+        if context_only and not search_type:
+            # Not the configured default: that is normally CHUNKS, which has no
+            # completion to skip, so the flag would do nothing.
+            search_type = _CONTEXT_ONLY_SEARCH_TYPE
 
         try:
             results = self._recall(
@@ -1186,6 +1203,7 @@ class CogneeMemoryProvider(MemoryProvider):
                 search_type=search_type,
                 top_k=top_k,
                 session_id=self._session_cognee_id,
+                only_context=context_only,
             )
             self._record_success()
             items = [self._normalize_recall_item(item) for item in results]

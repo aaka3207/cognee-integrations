@@ -450,7 +450,14 @@ in, are never requested. Turns are still written to the session cache — that i
 what `improve()` promotes into the graph at session end — but they are not
 searched as raw entries; on cognee >= 1.6.0 the graph item's prompt already
 carries this conversation's history because the session id travels with every
-recall. `cognee_recall` takes `query`, an optional `search_type` and `top_k`.
+recall. `cognee_recall` takes `query`, an optional `search_type` and `top_k`,
+and `context_only`: with it set, the server skips its LLM completion and the
+result's `text` is the context that completion would have read (the graph's
+entities and relationships plus the matching passages), so the agent writes
+the answer from the sources. It runs `GRAPH_COMPLETION` unless `search_type`
+names another completion type, ignoring a configured `CHUNKS` default, which
+has no completion to skip. No answer is generated, so none is saved to the
+session.
 
 ## Code graph: index a repository
 

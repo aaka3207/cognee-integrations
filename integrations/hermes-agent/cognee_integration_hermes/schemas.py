@@ -31,6 +31,17 @@ RECALL_SCHEMA = {
                 "type": "integer",
                 "description": "Maximum number of results to return. Default: provider config.",
             },
+            "context_only": {
+                "type": "boolean",
+                "description": (
+                    "Return what the graph search found instead of an answer "
+                    "written from it: the related entities, relationships and "
+                    "stored passages, verbatim. Use it for broad or relational "
+                    "questions where CHUNKS is too narrow, then answer from the "
+                    "returned context yourself. Runs GRAPH_COMPLETION unless "
+                    "search_type names another completion type. Default: false."
+                ),
+            },
         },
         "required": ["query"],
     },
