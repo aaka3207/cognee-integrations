@@ -153,7 +153,15 @@ class TestDefaults(unittest.TestCase):
         self.assertIs(cfg["improve_on_end"], True)
         self.assertIs(cfg["session_writes"], True)
         self.assertIs(cfg["write_metadata"], False)
+        self.assertEqual(cfg["created_by"], "hermes")
         self.assertIs(cfg["embedded"], False)
+
+    def test_created_by_reads_the_environment_and_the_file(self):
+        self.assertEqual(_load(env={"COGNEE_CREATED_BY": "hermes-a"})["created_by"], "hermes-a")
+        cfg = _load(env={"COGNEE_CREATED_BY": "hermes-a"}, file_config={"created_by": " hermes-b "})
+        self.assertEqual(cfg["created_by"], "hermes-b")
+        # Blank falls back to the default rather than stamping an empty writer.
+        self.assertEqual(_load(file_config={"created_by": "  "})["created_by"], "hermes")
 
     def test_write_metadata_reads_the_environment_and_the_file(self):
         self.assertIs(_load(env={"COGNEE_WRITE_METADATA": "true"})["write_metadata"], True)

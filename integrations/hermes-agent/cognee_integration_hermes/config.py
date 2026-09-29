@@ -13,6 +13,8 @@ from typing import Any
 # under ~/.cognee-plugin. Hermes joins that convention — same names, same paths —
 # so memory written in any of them is recalled in all of them.
 DEFAULT_DATASET = "agent_sessions"
+# The ``created_by`` stamped on metadata writes when ``write_metadata`` is on.
+DEFAULT_CREATED_BY = "hermes"
 SHARED_PLUGIN_STATE_DIR = Path.home() / ".cognee-plugin"
 SHARED_COGNEE_HOME = Path.home() / ".cognee"
 # Port for the local cognee server. 8011 matches the other cognee agent plugins
@@ -230,6 +232,9 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
         # on the document and, from 1.6.1, copies it onto each chunk. Off by
         # default so the wire request is unchanged until asked for.
         "write_metadata": str_to_bool(os.environ.get("COGNEE_WRITE_METADATA"), False),
+        # The ``created_by`` value those writes carry. Distinguishes agents -- or
+        # Hermes profiles -- that write to one shared dataset.
+        "created_by": os.environ.get("COGNEE_CREATED_BY", DEFAULT_CREATED_BY),
         # Tri-state: "" = auto (background only in server/remote mode, where the
         # server outlives this process; synchronous in embedded). Set to force.
         "improve_background": os.environ.get("COGNEE_IMPROVE_BACKGROUND", ""),
@@ -293,6 +298,7 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
     config["improve_on_end"] = str_to_bool(config.get("improve_on_end"), True)
     config["session_writes"] = str_to_bool(config.get("session_writes"), True)
     config["write_metadata"] = str_to_bool(config.get("write_metadata"), False)
+    config["created_by"] = str(config.get("created_by") or "").strip() or DEFAULT_CREATED_BY
     config["embedded"] = str_to_bool(config.get("embedded"), False)
     config["recall_budget"] = max(1, str_to_int(config.get("recall_budget"), 20))
     config["memory_steer"] = str_to_bool(config.get("memory_steer"), True)
