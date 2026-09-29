@@ -284,6 +284,36 @@ class TestRememberWireFormat(unittest.TestCase):
         self.assertIn("session_ids", "\n".join(logs.output))
         self.assertNotIn("session_ids", opener.multipart_fields("/api/v1/remember"))
 
+    def test_permanent_write_sends_metadata_as_a_one_entry_json_array(self):
+        # The server pairs the array positionally with the uploaded files.
+        opener = FakeOpener({"/api/v1/remember": {"status": "completed"}})
+        meta = {"created_at": "2026-09-29T15:00:00+00:00", "write_origin": "cognee_remember"}
+        _backend(opener).remember_permanent(
+            text="a fact", dataset="hermes", session_ids=[], timeout=_TIMEOUT, metadata=meta
+        )
+        fields = opener.multipart_fields("/api/v1/remember")
+        self.assertEqual(json.loads(fields["external_metadata"]), [meta])
+        self.assertEqual(fields["data"], "a fact")
+
+    def test_permanent_write_without_metadata_sends_no_metadata_field(self):
+        for metadata in (None, {}):
+            with self.subTest(metadata=metadata):
+                opener = FakeOpener({"/api/v1/remember": {"status": "completed"}})
+                _backend(opener).remember_permanent(
+                    text="t", dataset="d", session_ids=[], timeout=_TIMEOUT, metadata=metadata
+                )
+                self.assertNotIn("external_metadata", opener.multipart_fields("/api/v1/remember"))
+
+    def test_metadata_is_never_sent_with_a_session_id(self):
+        # cognee rejects external_metadata alongside session_id.
+        opener = FakeOpener({"/api/v1/remember": {"status": "completed"}})
+        _backend(opener)._remember(
+            text="t", dataset="d", session_id="s", timeout=_TIMEOUT, metadata={"k": "v"}
+        )
+        fields = opener.multipart_fields("/api/v1/remember")
+        self.assertEqual(fields["session_id"], "s")
+        self.assertNotIn("external_metadata", fields)
+
     def test_a_permanent_write_is_multipart(self):
         opener = FakeOpener({"/api/v1/remember": {}})
         _backend(opener).remember_permanent(text="t", dataset="d", session_ids=[], timeout=_TIMEOUT)

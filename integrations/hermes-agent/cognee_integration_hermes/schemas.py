@@ -58,6 +58,27 @@ REMEMBER_SCHEMA = {
     },
 }
 
+# Offered in place of REMEMBER_SCHEMA when ``write_metadata`` is on, and only
+# then: with the setting off the argument would be accepted and dropped.
+REMEMBER_WITH_METADATA_SCHEMA = {
+    **REMEMBER_SCHEMA,
+    "parameters": {
+        **REMEMBER_SCHEMA["parameters"],
+        "properties": {
+            **REMEMBER_SCHEMA["parameters"]["properties"],
+            "notion_page_id": {
+                "type": "string",
+                "description": (
+                    "Optional. The Notion page this fact is about, as a page id or "
+                    "a full Notion URL. Stored as metadata beside the content, so "
+                    "the current state can be looked up in Notion. Must contain the "
+                    "page's 32-character id; anything else is rejected, not stored."
+                ),
+            },
+        },
+    },
+}
+
 FORGET_SCHEMA = {
     "name": "cognee_forget",
     "description": (

@@ -152,7 +152,14 @@ class TestDefaults(unittest.TestCase):
         self.assertEqual(cfg["search_type"], "")
         self.assertIs(cfg["improve_on_end"], True)
         self.assertIs(cfg["session_writes"], True)
+        self.assertIs(cfg["write_metadata"], False)
         self.assertIs(cfg["embedded"], False)
+
+    def test_write_metadata_reads_the_environment_and_the_file(self):
+        self.assertIs(_load(env={"COGNEE_WRITE_METADATA": "true"})["write_metadata"], True)
+        # The file wins, and a string value from cognee.json is normalised.
+        cfg = _load(env={"COGNEE_WRITE_METADATA": "true"}, file_config={"write_metadata": "no"})
+        self.assertIs(cfg["write_metadata"], False)
 
     def test_search_type_is_normalised_to_upper_case(self):
         # The wire upper-cases it anyway; normalising here means a config written

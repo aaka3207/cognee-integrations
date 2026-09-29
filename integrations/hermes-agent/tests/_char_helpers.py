@@ -39,6 +39,9 @@ _FAKE_MODULE_PATHS = (
     "cognee.modules",
     "cognee.modules.search",
     "cognee.modules.search.types",
+    "cognee.tasks",
+    "cognee.tasks.ingestion",
+    "cognee.tasks.ingestion.data_item",
 )
 
 
@@ -47,6 +50,15 @@ class RememberResultStub:
 
     def __init__(self, status="completed"):
         self.status = status
+
+
+class FakeDataItem:
+    """cognee's ``DataItem``: the SDK's carrier for per-item external_metadata."""
+
+    def __init__(self, data, label=None, external_metadata=None):
+        self.data = data
+        self.label = label
+        self.external_metadata = external_metadata
 
 
 class _SearchType:
@@ -192,10 +204,14 @@ def fake_cognee():
     for path in _FAKE_MODULE_PATHS[1:]:
         modules[path] = types.ModuleType(path)
     modules["cognee.modules.search.types"].SearchType = _SearchType
+    modules["cognee.tasks.ingestion.data_item"].DataItem = FakeDataItem
     # Parent-attribute wiring, so both ``import a.b`` and ``from a.b import c`` work.
     modules["cognee"].modules = modules["cognee.modules"]
     modules["cognee.modules"].search = modules["cognee.modules.search"]
     modules["cognee.modules.search"].types = modules["cognee.modules.search.types"]
+    modules["cognee"].tasks = modules["cognee.tasks"]
+    modules["cognee.tasks"].ingestion = modules["cognee.tasks.ingestion"]
+    modules["cognee.tasks.ingestion"].data_item = modules["cognee.tasks.ingestion.data_item"]
 
     saved = {path: sys.modules.get(path) for path in _FAKE_MODULE_PATHS}
     sys.modules.update(modules)
@@ -369,6 +385,7 @@ def make_provider(
     auto_route=True,
     improve_on_end=True,
     session_writes=True,
+    write_metadata=False,
     search_type="",
     config=None,
 ):
@@ -392,6 +409,7 @@ def make_provider(
     provider._default_search_type = search_type
     provider._improve_on_end = improve_on_end
     provider._session_writes = session_writes
+    provider._write_metadata = write_metadata
     provider._session_id = session_id
     provider._session_cognee_id = session_cognee_id or f"hermes_{session_id}"
     provider._default_dataset = dataset
