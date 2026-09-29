@@ -119,9 +119,19 @@ class MemoryBackend:
         raise NotImplementedError
 
     def remember_permanent(
-        self, *, text: str, dataset: str, session_ids: list[str], timeout: float
+        self,
+        *,
+        text: str,
+        dataset: str,
+        session_ids: list[str],
+        timeout: float,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> Any:
-        """Store content in the permanent graph."""
+        """Store content in the permanent graph.
+
+        ``metadata`` becomes the document's ``external_metadata``. None or empty
+        sends nothing, so the request is exactly what it was before the field.
+        """
         raise NotImplementedError
 
     def forget(
@@ -357,9 +367,9 @@ class SdkBackend(MemoryBackend):
             self._do_remember_session(text, session_id, dataset), timeout=timeout
         )
 
-    def remember_permanent(self, *, text, dataset, session_ids, timeout) -> Any:
+    def remember_permanent(self, *, text, dataset, session_ids, timeout, metadata=None) -> Any:
         return self._bridge.run(
-            self._do_remember_permanent(text, dataset, session_ids), timeout=timeout
+            self._do_remember_permanent(text, dataset, session_ids, metadata), timeout=timeout
         )
 
     def forget(self, *, dataset, everything, memory_only, timeout) -> dict[str, Any]:
@@ -485,11 +495,24 @@ class SdkBackend(MemoryBackend):
         self._add_user_kwarg(kwargs)
         return await cognee.remember(**kwargs)
 
-    async def _do_remember_permanent(self, content: str, dataset: str, session_ids: list[str]):
+    async def _do_remember_permanent(
+        self,
+        content: str,
+        dataset: str,
+        session_ids: list[str],
+        metadata: Optional[dict[str, Any]] = None,
+    ):
         import cognee
 
+        data: Any = content
+        if metadata:
+            # The SDK's carrier for per-item metadata; the HTTP transport sends
+            # the same dict as the ``external_metadata`` form field.
+            from cognee.tasks.ingestion.data_item import DataItem
+
+            data = DataItem(data=content, external_metadata=dict(metadata))
         kwargs: dict[str, Any] = {
-            "data": content,
+            "data": data,
             "dataset_name": dataset,
             "self_improvement": True,
             "session_ids": session_ids,

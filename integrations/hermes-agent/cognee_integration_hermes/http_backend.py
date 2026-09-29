@@ -17,7 +17,9 @@ on the pinned 1.5.4):
 ``remember_session`` ``POST /api/v1/remember`` multipart: ``data``,
                      ``datasetName``, ``session_id``
 ``remember_permanent`` ``POST /api/v1/remember`` multipart: ``data``,
-                     ``datasetName`` (no session -> direct add+cognify)
+                     ``datasetName`` (no session -> direct add+cognify),
+                     ``external_metadata`` (JSON array, one object per file;
+                     only when metadata is given)
 ``improve``          ``POST /api/v1/improve``  JSON: ``dataset_name``,
                      ``session_ids``, ``run_in_background``
 ``forget``           ``POST /api/v1/forget``   JSON: ``dataset``, ``everything``,
@@ -688,11 +690,22 @@ class HttpBackend(MemoryBackend):
         return result or []
 
     def _remember(
-        self, *, text: str, dataset: str, session_id: str, timeout: float
+        self,
+        *,
+        text: str,
+        dataset: str,
+        session_id: str,
+        timeout: float,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> RememberResponse:
         fields = {"datasetName": dataset}
         if session_id:
             fields["session_id"] = session_id
+        elif metadata:
+            # A JSON array paired positionally with the uploaded files -- one
+            # file here, so one object. The server rejects this field alongside
+            # a session_id, which is why only the direct-ingest branch sends it.
+            fields["external_metadata"] = json.dumps([dict(metadata)])
         # The upload name has to vary with the content. cognee >= 1.6.0 will not
         # let ``add()`` replace a same-named document whose body differs -- it
         # raises ``DocumentUpdateRequiredError`` (HTTP 409) instead. With a fixed
@@ -734,7 +747,9 @@ class HttpBackend(MemoryBackend):
         )
         return RememberResponse(payload if isinstance(payload, dict) else {})
 
-    def remember_permanent(self, *, text, dataset, session_ids, timeout) -> RememberResponse:
+    def remember_permanent(
+        self, *, text, dataset, session_ids, timeout, metadata=None
+    ) -> RememberResponse:
         if session_ids:
             self._warn_once(
                 "remember_session_ids",
@@ -743,7 +758,9 @@ class HttpBackend(MemoryBackend):
                 "to the session. The session-to-graph bridge (improve) is unaffected.",
             )
         # No session_id -> the server does a direct add + cognify.
-        return self._remember(text=text, dataset=dataset, session_id="", timeout=timeout)
+        return self._remember(
+            text=text, dataset=dataset, session_id="", timeout=timeout, metadata=metadata
+        )
 
     def forget(self, *, dataset, everything, memory_only, timeout) -> dict[str, Any]:
         body: dict[str, Any] = {"everything": everything, "memory_only": memory_only}

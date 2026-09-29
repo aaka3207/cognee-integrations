@@ -6,8 +6,11 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import threading
 import time
+import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -34,6 +37,7 @@ from .schemas import (
     FORGET_SCHEMA,
     RECALL_SCHEMA,
     REMEMBER_SCHEMA,
+    REMEMBER_WITH_METADATA_SCHEMA,
     SWITCH_DATASET_SCHEMA,
 )
 from .server_bootstrap import ensure_local_server
@@ -51,6 +55,38 @@ except ImportError:  # pragma: no cover - lets package smoke tests run outside H
 logger = logging.getLogger(__name__)
 
 _BREAKER_THRESHOLD = 5
+
+# A Notion page id: 32 hex digits, bare or in the dashed 8-4-4-4-12 form. In a
+# URL the bare form ends the slug ("Title-<32 hex>"), so the lookarounds keep a
+# hex-looking last title word from being read as part of the id.
+_NOTION_DASHED_ID = re.compile(
+    r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])"
+)
+_NOTION_BARE_ID = re.compile(r"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])")
+
+
+def _normalize_notion_page_id(value: Any) -> str:
+    """The page id in *value* as a dashed lowercase UUID, or "" if there is none.
+
+    Accepts a bare id, a dashed id or a Notion URL. A peek URL
+    (``.../<database>?v=<view>&p=<page>``) names the page in ``p``, so that wins;
+    otherwise the query and fragment are dropped, because ``v`` is a database
+    view id and would be read as a valid-looking wrong answer.
+    """
+    raw = str(value or "").strip().lower()
+    path, _, query = raw.split("#", 1)[0].partition("?")
+    peek = urllib.parse.parse_qs(query).get("p")
+    text = peek[0] if peek else path
+    dashed = _NOTION_DASHED_ID.findall(text)
+    if dashed:
+        return dashed[-1]
+    bare = _NOTION_BARE_ID.findall(text)
+    if not bare:
+        return ""
+    h = bare[-1]
+    return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
+
+
 _BREAKER_COOLDOWN_SECS = 120
 
 
@@ -148,6 +184,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._default_search_type = ""
         self._improve_on_end = True
         self._session_writes = True
+        self._write_metadata = False
         self._writes_enabled = True
         self._hermes_home: str | None = None
         self._prefetch_result = ""
@@ -326,6 +363,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._default_search_type = str(self._config.get("search_type") or "").strip()
         self._improve_on_end = str_to_bool(self._config.get("improve_on_end"), True)
         self._session_writes = str_to_bool(self._config.get("session_writes"), True)
+        self._write_metadata = str_to_bool(self._config.get("write_metadata"), False)
         self._writes_enabled = kwargs.get("agent_context", "primary") in {"", "primary", None}
         self._session_cognee_id = self._build_cognee_session_id(session_id, **kwargs)
         self._apply_dataset_override()
@@ -590,7 +628,12 @@ class CogneeMemoryProvider(MemoryProvider):
         self._sync_thread.start()
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
-        schemas = [RECALL_SCHEMA, REMEMBER_SCHEMA, FORGET_SCHEMA]
+        remember = (
+            REMEMBER_WITH_METADATA_SCHEMA
+            if str_to_bool(self._config.get("write_metadata"), False)
+            else REMEMBER_SCHEMA
+        )
+        schemas = [RECALL_SCHEMA, remember, FORGET_SCHEMA]
         # Config may not be loaded yet when Hermes collects schemas; the
         # defaults (on) match load_config's, so both paths agree.
         if str_to_bool(self._config.get("dataset_switch_tool"), True):
@@ -759,10 +802,13 @@ class CogneeMemoryProvider(MemoryProvider):
         metadata = dict(metadata or {})
         source = metadata.get("write_origin") or "hermes_memory_tool"
         payload = f"Hermes {target} memory ({action}, {source}): {content}"
+        # Built here, not in the worker: the session id must be the one current
+        # when Hermes made the write, not whichever is current when it lands.
+        write_metadata = self._metadata_for(source)
 
         def _sync() -> None:
             try:
-                self._remember_permanent(payload, self._dataset)
+                self._remember_permanent(payload, self._dataset, metadata=write_metadata)
                 self._record_success()
             except Exception as exc:
                 self._record_failure()
@@ -877,12 +923,35 @@ class CogneeMemoryProvider(MemoryProvider):
             timeout=self._timeout("recall_timeout", 120),
         )
 
-    def _remember_permanent(self, content: str, dataset: str) -> Any:
+    def _metadata_for(
+        self, origin: str, extra: Optional[dict[str, Any]] = None
+    ) -> Optional[dict[str, Any]]:
+        """The ``external_metadata`` for one permanent write, or None when off.
+
+        ``created_at`` is the write time in UTC. ``hermes_session_id`` is the
+        Hermes session id, not the cognee one, so the record points back at the
+        conversation it came from. ``write_origin`` names the lane that wrote it.
+        """
+        if not self._write_metadata:
+            return None
+        metadata: dict[str, Any] = {
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "write_origin": origin,
+        }
+        if self._session_id:
+            metadata["hermes_session_id"] = self._session_id
+        metadata.update(extra or {})
+        return metadata
+
+    def _remember_permanent(
+        self, content: str, dataset: str, *, metadata: Optional[dict[str, Any]] = None
+    ) -> Any:
         return self._backend.remember_permanent(
             text=content,
             dataset=dataset,
             session_ids=[self._session_cognee_id],
             timeout=self._timeout("write_timeout", 120),
+            metadata=metadata,
         )
 
     # -- layered per-prompt recall -------------------------------------------
@@ -1107,9 +1176,28 @@ class CogneeMemoryProvider(MemoryProvider):
         if not content:
             return json.dumps({"error": "Missing required parameter: content"})
         dataset = str(args.get("dataset") or self._dataset)
+        extra: dict[str, Any] = {}
+        raw_page_id = args.get("notion_page_id")
+        if self._write_metadata and raw_page_id:
+            page_id = _normalize_notion_page_id(raw_page_id)
+            if not page_id:
+                # Refuse rather than store a pointer that resolves to nothing: a
+                # truncated id reads as usable and is worse than no pointer.
+                return json.dumps(
+                    {
+                        "error": (
+                            "notion_page_id must contain a Notion page id (32 hex "
+                            "characters, bare or dashed) or be a Notion URL ending "
+                            f"in one; got {str(raw_page_id)[:120]!r}. Nothing was stored."
+                        )
+                    }
+                )
+            extra["notion_page_id"] = page_id
 
         try:
-            result = self._remember_permanent(content, dataset)
+            result = self._remember_permanent(
+                content, dataset, metadata=self._metadata_for("cognee_remember", extra)
+            )
             self._record_success()
             status = getattr(result, "status", "completed")
             envelope = {"result": "Content stored in Cognee.", "status": str(status)}

@@ -143,6 +143,25 @@ class TestRememberWireFormat(unittest.TestCase):
         self.assertNotIn("session_id", kwargs)
 
 
+class TestPermanentWriteMetadata(unittest.TestCase):
+    def test_metadata_travels_as_a_data_item(self):
+        meta = {"created_at": "2026-09-29T15:00:00+00:00", "write_origin": "cognee_remember"}
+        with fake_cognee() as fake:
+            _backend(served=True).remember_permanent(
+                text="fact", dataset="hermes", session_ids=[], timeout=_TIMEOUT, metadata=meta
+            )
+            data = fake.only_call("remember")["data"]
+        self.assertEqual(data.data, "fact")
+        self.assertEqual(data.external_metadata, meta)
+
+    def test_without_metadata_the_data_is_the_plain_text(self):
+        with fake_cognee() as fake:
+            _backend(served=True).remember_permanent(
+                text="fact", dataset="hermes", session_ids=[], timeout=_TIMEOUT
+            )
+            self.assertEqual(fake.only_call("remember")["data"], "fact")
+
+
 class TestForgetWireFormat(unittest.TestCase):
     def _forget_kwargs(self, **overrides):
         params = {
