@@ -61,12 +61,25 @@ class TestOn(unittest.TestCase):
         before = datetime.now(timezone.utc) - timedelta(seconds=1)
         _, meta, _ = self._metadata({"content": "fact"}, session_id="sess-42")
         self.assertEqual(meta["write_origin"], "cognee_remember")
+        self.assertEqual(meta["created_by"], "hermes")
         # The Hermes session id, not the cognee one, so it points at the transcript.
         self.assertEqual(meta["hermes_session_id"], "sess-42")
         created = datetime.fromisoformat(meta["created_at"])
         self.assertEqual(created.utcoffset(), timedelta(0))
         self.assertGreaterEqual(created, before.replace(microsecond=0))
         self.assertNotIn("notion_page_id", meta)
+
+    def test_the_automatic_keys_cannot_be_overwritten(self):
+        with fake_backend() as fake:
+            provider = make_provider(write_metadata=True, session_id="sess-1")
+            meta = provider._metadata_for(
+                "cognee_remember",
+                {"created_by": "claude", "write_origin": "x", "hermes_session_id": "y"},
+            )
+            self.assertEqual(fake.kwargs_for("remember_permanent"), [])
+        self.assertEqual(meta["created_by"], "hermes")
+        self.assertEqual(meta["write_origin"], "cognee_remember")
+        self.assertEqual(meta["hermes_session_id"], "sess-1")
 
     def test_no_session_id_means_no_session_key(self):
         _, meta, _ = self._metadata({"content": "fact"}, session_id="")
@@ -103,6 +116,7 @@ class TestMemoryWriteMirror(unittest.TestCase):
     def test_the_default_origin_is_the_memory_tool(self):
         meta = self._mirror_metadata("add", "project", "prefers tabs")
         self.assertEqual(meta["write_origin"], "hermes_memory_tool")
+        self.assertEqual(meta["created_by"], "hermes")
         self.assertEqual(meta["hermes_session_id"], "sess-7")
 
     def test_the_callers_write_origin_is_kept(self):

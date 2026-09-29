@@ -928,19 +928,23 @@ class CogneeMemoryProvider(MemoryProvider):
     ) -> Optional[dict[str, Any]]:
         """The ``external_metadata`` for one permanent write, or None when off.
 
-        ``created_at`` is the write time in UTC. ``hermes_session_id`` is the
-        Hermes session id, not the cognee one, so the record points back at the
-        conversation it came from. ``write_origin`` names the lane that wrote it.
+        ``created_at`` is the write time in UTC. ``created_by`` names the agent:
+        several agents can share one dataset, and this one is always Hermes.
+        ``hermes_session_id`` is the Hermes session id, not the cognee one, so the
+        record points back at the conversation it came from. ``write_origin``
+        names the lane that wrote it. These are set here, after *extra*, so a
+        caller cannot overwrite them.
         """
         if not self._write_metadata:
             return None
-        metadata: dict[str, Any] = {
-            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "write_origin": origin,
-        }
+        metadata: dict[str, Any] = dict(extra or {})
+        metadata.update(
+            created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            created_by="hermes",
+            write_origin=origin,
+        )
         if self._session_id:
             metadata["hermes_session_id"] = self._session_id
-        metadata.update(extra or {})
         return metadata
 
     def _remember_permanent(
