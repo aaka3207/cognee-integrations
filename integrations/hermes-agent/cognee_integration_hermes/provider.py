@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from . import code_graph, dataset_overrides, exit_watcher
+from . import code_graph, dataset_overrides, exit_watcher, notion_pointer
 from .backend import MemoryBackend, build_backend, default_backend, has_cognee
 from .config import (
     DEFAULT_CREATED_BY,
@@ -1222,6 +1222,8 @@ class CogneeMemoryProvider(MemoryProvider):
         extra: dict[str, Any] = {}
         if self._write_metadata:
             extra, problem = _clean_metadata(args.get("metadata"))
+            # Fork-only convention; see notion_pointer.py.
+            problem = problem or notion_pointer.check_metadata(extra)
             if problem:
                 return json.dumps({"error": f"{problem} Nothing was stored."})
 
