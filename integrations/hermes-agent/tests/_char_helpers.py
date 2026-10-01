@@ -386,6 +386,7 @@ def make_provider(
     improve_on_end=True,
     session_writes=True,
     write_metadata=False,
+    memory_write_targets=None,
     search_type="",
     config=None,
 ):
@@ -410,6 +411,9 @@ def make_provider(
     provider._improve_on_end = improve_on_end
     provider._session_writes = session_writes
     provider._write_metadata = write_metadata
+    provider._memory_write_targets = (
+        None if memory_write_targets is None else frozenset(memory_write_targets)
+    )
     provider._session_id = session_id
     provider._session_cognee_id = session_cognee_id or f"hermes_{session_id}"
     provider._default_dataset = dataset

@@ -62,6 +62,29 @@ def str_to_int(value: Any, default: int) -> int:
         return default
 
 
+def parse_memory_write_targets(value: Any) -> list[str] | None:
+    """Normalise ``memory_write_targets`` to a sorted list, or None for "all".
+
+    Accepts a list from ``cognee.json`` or a comma-separated string from the
+    environment. Unset, ``""`` and ``"all"`` mean every target (upstream
+    behaviour); ``"none"`` and ``[]`` mean no target.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"", "all"}:
+            return None
+        if text == "none":
+            return []
+        items = text.split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = [str(item) for item in value]
+    else:
+        return None
+    return sorted({item.strip().lower() for item in items if item.strip()})
+
+
 # Context-length ceilings for the Ollama embedding models we recognize, verified
 # against ``ollama show <model>`` ("context length"). Values may sit below a
 # model's true context (e.g. sfr-embedding-mistral takes 32k): a low ceiling only
@@ -232,6 +255,12 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
         # on the document and, from 1.6.1, copies it onto each chunk. Off by
         # default so the wire request is unchanged until asked for.
         "write_metadata": str_to_bool(os.environ.get("COGNEE_WRITE_METADATA"), False),
+        # Which Hermes built-in memory targets ``on_memory_write`` copies into
+        # the dataset: "memory" (MEMORY.md, agent notes) and "user" (USER.md,
+        # facts about the user). Unset mirrors every target, as upstream does.
+        # A dataset shared with other agents usually wants "user" only, so the
+        # agent's notes about its own behaviour stay out of it.
+        "memory_write_targets": os.environ.get("COGNEE_MEMORY_WRITE_TARGETS", ""),
         # The ``created_by`` value those writes carry. Distinguishes agents -- or
         # Hermes profiles -- that write to one shared dataset.
         "created_by": os.environ.get("COGNEE_CREATED_BY", DEFAULT_CREATED_BY),
@@ -298,6 +327,7 @@ def load_config(hermes_home: str | Path | None = None) -> dict[str, Any]:
     config["improve_on_end"] = str_to_bool(config.get("improve_on_end"), True)
     config["session_writes"] = str_to_bool(config.get("session_writes"), True)
     config["write_metadata"] = str_to_bool(config.get("write_metadata"), False)
+    config["memory_write_targets"] = parse_memory_write_targets(config.get("memory_write_targets"))
     config["created_by"] = str(config.get("created_by") or "").strip() or DEFAULT_CREATED_BY
     config["embedded"] = str_to_bool(config.get("embedded"), False)
     config["recall_budget"] = max(1, str_to_int(config.get("recall_budget"), 20))

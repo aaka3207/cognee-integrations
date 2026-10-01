@@ -23,6 +23,7 @@ from .config import (
     DEFAULT_SERVER_BOOT_TIMEOUT,
     SHARED_PLUGIN_STATE_DIR,
     load_config,
+    parse_memory_write_targets,
     resolve_hermes_home,
     resolve_local_roots,
     str_to_bool,
@@ -225,6 +226,7 @@ class CogneeMemoryProvider(MemoryProvider):
         self._improve_on_end = True
         self._session_writes = True
         self._write_metadata = False
+        self._memory_write_targets: frozenset[str] | None = None
         self._created_by = DEFAULT_CREATED_BY
         self._writes_enabled = True
         self._hermes_home: str | None = None
@@ -405,6 +407,8 @@ class CogneeMemoryProvider(MemoryProvider):
         self._improve_on_end = str_to_bool(self._config.get("improve_on_end"), True)
         self._session_writes = str_to_bool(self._config.get("session_writes"), True)
         self._write_metadata = str_to_bool(self._config.get("write_metadata"), False)
+        targets = parse_memory_write_targets(self._config.get("memory_write_targets"))
+        self._memory_write_targets = None if targets is None else frozenset(targets)
         self._created_by = str(self._config.get("created_by") or DEFAULT_CREATED_BY)
         self._writes_enabled = kwargs.get("agent_context", "primary") in {"", "primary", None}
         self._session_cognee_id = self._build_cognee_session_id(session_id, **kwargs)
@@ -833,11 +837,18 @@ class CogneeMemoryProvider(MemoryProvider):
         # it: a non-primary agent_context (a subagent) must not write to memory.
         # Without it a subagent's built-in memory write still reached the graph
         # while its conversation turns were correctly suppressed.
+        # ``memory_write_targets`` limits which targets are copied: "memory"
+        # holds the agent's notes on its own behaviour, which do not belong in
+        # a dataset other agents read as facts about the user.
         if (
             not self._is_usable()
             or not self._writes_enabled
             or action not in {"add", "replace"}
             or not content
+            or (
+                self._memory_write_targets is not None
+                and str(target or "").strip().lower() not in self._memory_write_targets
+            )
             or self._is_breaker_open()
         ):
             return

@@ -169,6 +169,21 @@ class TestDefaults(unittest.TestCase):
         cfg = _load(env={"COGNEE_WRITE_METADATA": "true"}, file_config={"write_metadata": "no"})
         self.assertIs(cfg["write_metadata"], False)
 
+    def test_memory_write_targets_default_to_every_target(self):
+        self.assertIsNone(_load()["memory_write_targets"])
+        self.assertIsNone(_load(file_config={"memory_write_targets": "all"})["memory_write_targets"])
+
+    def test_memory_write_targets_read_the_environment_and_the_file(self):
+        env = {"COGNEE_MEMORY_WRITE_TARGETS": " User, memory "}
+        self.assertEqual(_load(env=env)["memory_write_targets"], ["memory", "user"])
+        # The file wins, and a JSON list is normalised the same way.
+        cfg = _load(env=env, file_config={"memory_write_targets": ["USER"]})
+        self.assertEqual(cfg["memory_write_targets"], ["user"])
+
+    def test_memory_write_targets_none_and_empty_list_mirror_nothing(self):
+        self.assertEqual(_load(file_config={"memory_write_targets": "none"})["memory_write_targets"], [])
+        self.assertEqual(_load(file_config={"memory_write_targets": []})["memory_write_targets"], [])
+
     def test_search_type_is_normalised_to_upper_case(self):
         # The wire upper-cases it anyway; normalising here means a config written
         # as "chunks" and one written as "CHUNKS" are the same setting.

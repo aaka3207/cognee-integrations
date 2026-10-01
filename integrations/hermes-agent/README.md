@@ -327,6 +327,7 @@ LLM_API_KEY=sk-...
 | `improve_on_end` | `COGNEE_IMPROVE_ON_END` | `true` |
 | `session_writes` | `COGNEE_SESSION_WRITES` | `true` (per-turn session-cache write) |
 | `write_metadata` | `COGNEE_WRITE_METADATA` | `false` (on: permanent writes carry `created_at`, `created_by`, `hermes_session_id`, `write_origin` as `external_metadata`, and `cognee_remember` accepts an optional flat `metadata` object; `cognee_recall` returns stored metadata with each result) |
+| `memory_write_targets` | `COGNEE_MEMORY_WRITE_TARGETS` | all targets (which built-in memory targets `on_memory_write` copies into the dataset: a list such as `["user"]`, or a comma-separated string; `"none"` copies nothing. `user` is USER.md, `memory` is the agent's MEMORY.md notes) |
 | `created_by` | `COGNEE_CREATED_BY` | `hermes` (the `created_by` value on metadata writes) |
 | `improve_background` | `COGNEE_IMPROVE_BACKGROUND` | auto |
 | `session_prefix` | `COGNEE_SESSION_PREFIX` | `hermes` |

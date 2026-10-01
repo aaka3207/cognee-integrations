@@ -128,6 +128,46 @@ class TestAgentContextWriteGating(unittest.TestCase):
         self.assertEqual(len(fake.kwargs_for("remember_permanent")), 1)
 
 
+class TestMemoryWriteTargets(unittest.TestCase):
+    """``memory_write_targets`` picks which built-in memory targets are copied.
+
+    Hermes's "memory" target holds the agent's notes on its own behaviour; in a
+    dataset shared with other agents those read as facts about the user.
+    """
+
+    def test_unset_mirrors_every_target(self):
+        with fake_backend() as fake:
+            provider = make_provider()
+            provider.on_memory_write("add", "memory", "agent note")
+            self.assertTrue(fake.wait("remember_permanent"))
+
+    def test_a_listed_target_is_mirrored(self):
+        with fake_backend() as fake:
+            provider = make_provider(memory_write_targets=["user"])
+            provider.on_memory_write("add", "user", "user fact")
+            self.assertTrue(fake.wait("remember_permanent"))
+        self.assertEqual(len(fake.kwargs_for("remember_permanent")), 1)
+
+    def test_an_unlisted_target_is_not_mirrored(self):
+        with fake_backend() as fake:
+            provider = make_provider(memory_write_targets=["user"])
+            provider.on_memory_write("add", "memory", "agent note")
+            provider.on_memory_write("replace", "memory", "agent note")
+            assert_no_call(self, fake, "remember_permanent")
+
+    def test_target_matching_ignores_case_and_whitespace(self):
+        with fake_backend() as fake:
+            provider = make_provider(memory_write_targets=["user"])
+            provider.on_memory_write("add", " User ", "user fact")
+            self.assertTrue(fake.wait("remember_permanent"))
+
+    def test_an_empty_list_mirrors_nothing(self):
+        with fake_backend() as fake:
+            provider = make_provider(memory_write_targets=[])
+            provider.on_memory_write("add", "user", "user fact")
+            assert_no_call(self, fake, "remember_permanent")
+
+
 # --------------------------------------------------------------------------
 # Fail closed — a provider that never initialized must not touch cognee
 # --------------------------------------------------------------------------
